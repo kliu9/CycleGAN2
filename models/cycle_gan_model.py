@@ -130,6 +130,7 @@ class CycleGANModel(BaseModel):
         # Real
         pred_real = netD(real)
         loss_D_real = self.criterionGAN(pred_real, True)
+     #   print(pred_real.shape)
         # Fake
         pred_fake = netD(fake.detach())
         loss_D_fake = self.criterionGAN(pred_fake, False)

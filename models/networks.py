@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.nn import init
 import functools
 from torch.optim import lr_scheduler
-
+from typing import Tuple, Union, Optional, List
 
 ###############################################################################
 # Helper Functions
@@ -160,7 +161,7 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
-def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[]):
+def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[],image_size=256):
     """Create a discriminator
 
     Parameters:
@@ -199,6 +200,8 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer)
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
+    elif netD == 'transformer':
+        net = VisionTransformer(input_nc,1,256,16,128,64,128,num_heads=3,num_layers=6)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -614,3 +617,298 @@ class PixelDiscriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
         return self.net(input)
+
+class Transformer(nn.Module):
+    def __init__(self, dim: int, attn_dim: int, mlp_dim: int, num_heads: int, num_layers: int):
+        # dim       the dimension of the input
+        # attn_dim  the hidden dimension of the attention layer
+        # mlp_dim   the hidden layer of the FFN
+        # num_heads the number of heads in the attention layer
+        # num_layers the number of attention layers.
+        super().__init__()
+
+        # TODO: set up the parameters for the transformer!
+        #       You should set up num_layers of AttentionResiduals
+        #       nn.ModuleList will be helpful here.
+        layers = []
+        for _ in range(num_layers):
+            layers.append(AttentionResidual(dim,attn_dim,mlp_dim,num_heads))
+        self.layers = nn.ModuleList(layers)
+        # ======= Answer START ========
+
+        # ======= Answer END ========
+
+
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor, return_attn=False)-> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # x                the inputs. shape: (B x T x dim)
+        # attn_mask        an attention mask. Pass this to each of the AttentionResidual layers!
+        #                  shape: (B x T x T)
+        #
+        # Outputs:
+        # attn_output      shape: (B x T x dim)
+        # attn_alphas      If return_attn is False, return None. Otherwise return the attention weights
+        #                  of each of each of the attention heads for each of the layers.
+        #                  shape: (B x Num_layers x Num_heads x T x T)
+
+        output, collected_attns = None, None
+        attentions =[]
+        for layer in self.layers:
+            x,alpha = layer(x,attn_mask)
+            if return_attn:
+                attentions.append(alpha)
+        output = x
+        if return_attn:
+            collected_attns = torch.stack(attentions,dim=1)
+        # TODO: Implement the transformer forward pass! Pass the input successively through each of the
+        # AttentionResidual layers. If return_attn is True, collect the alphas along the way.
+
+        # ======= Answer START ========
+
+        # ======= Answer END ========
+
+        return output, collected_attns
+# these are already implemented for you!
+
+class FFN(nn.Module):
+    def __init__(self, dim: int, n_hidden: int):
+        # dim       the dimension of the input
+        # n_hidden  the width of the linear layer
+
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, n_hidden),
+            nn.GELU(),
+            nn.Linear(n_hidden, dim),
+        )
+
+    def forward(self, x: torch.Tensor)-> torch.Tensor:
+        # x         the input. shape: (B x T x dim)
+
+        # Outputs:
+        # out       the output of the feed-forward network: (B x T x dim)
+        return self.net(x)
+
+class AttentionResidual(nn.Module):
+    def __init__(self, dim: int, attn_dim: int, mlp_dim: int, num_heads: int):
+        # dim       the dimension of the input
+        # attn_dim  the hidden dimension of the attention layer
+        # mlp_dim   the hidden layer of the FFN
+        # num_heads the number of heads in the attention layer
+        super().__init__()
+        self.attn = MultiHeadedAttention(dim, attn_dim, num_heads)
+        self.ffn = FFN(dim, mlp_dim)
+
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # x                the inputs. shape: (B x T x dim)
+        # attn_mask        an attention mask. If None, ignore. If not None, then mask[b, i, j]
+        #                  contains 1 if (in batch b) token i should attend on token j and 0
+        #                  otherwise. shape: (B x T x T)
+        #
+        # Outputs:
+        # attn_output      shape: (B x T x dim)
+        # attn_alphas      the attention weights of each of the attention heads.
+        #                  shape: (B x Num_heads x T x T)
+
+        attn_out, alphas = self.attn(x=x, attn_mask=attn_mask)
+        x = attn_out + x
+        x = self.ffn(x) + x
+        return x, alphas
+class MultiHeadedAttention(nn.Module):
+    def __init__(self, dim: int, n_hidden: int, num_heads: int):
+        # dim: the dimension of the input
+        # n_hidden: the hidden dimenstion for the attention layer
+        # num_heads: the number of attention heads
+        super().__init__()
+
+        # TODO: set up your parameters for multi-head attention. You should initialize
+        #       num_heads attention heads (see nn.ModuleList) as well as a linear layer
+        #       that projects the concatenated outputs of each head into dim
+        #       (what size should this linear layer be?)
+
+        # ======= Answer START ========
+        lst = []
+        for i in range(num_heads):
+            lst.append(AttentionHead(dim,n_hidden))
+        self.heads = nn.ModuleList(lst)
+        self.linear = nn.Linear(num_heads*n_hidden,dim)
+        # ======= Answer  END ========
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        # x                the inputs. shape: (B x T x dim)
+        # attn_mask        an attention mask. If None, ignore. If not None, then mask[b, i, j]
+        #                  contains 1 if (in batch b) token i should attend on token j and 0
+        #                  otherwise. shape: (B x T x T)
+        #
+        # Outputs:
+        # attn_output      the output of performing multi-headed self-attention on x.
+        #                  shape: (B x T x dim)
+        # attn_alphas      the attention weights of each of the attention heads.
+        #                  shape: (B x Num_heads x T x T)
+
+        attn_output, attn_alphas = None, None
+        outlist =[]
+        alphalist = []
+        for head in self.heads:
+            out,alpha = head(x,attn_mask)
+            outlist.append(out)
+            alphalist.append(alpha)
+        attn_alphas = torch.stack(alphalist,dim=1)
+        attn_output = self.linear(torch.cat(outlist,dim=2))
+        # TODO: Compute multi-headed attention. Loop through each of your attention heads
+        #       and collect the outputs. Concatenate them together along the hidden dimension,
+        #       and then project them back into the output dimension (dim). Return both
+        #       the final attention outputs as well as the alphas from each head.
+
+        # ======= Answer START ========
+
+        # ======= Answer END ========
+        return attn_output, attn_alphas
+class PatchEmbed(nn.Module):
+    """ Image to Patch Embedding
+    """
+    def __init__(self, img_size: int, patch_size: int, nin: int, nout: int):
+        # img_size       the width and height of the image. you can assume that
+        #                the images will be square
+        # patch_size     the width of each square patch. You can assume that
+        #                img_size is divisible by patch_size
+        # nin            the number of input channels
+        # nout           the number of output channels
+
+        super().__init__()
+        assert img_size % patch_size == 0
+
+        self.img_size = img_size
+        self.num_patches = (img_size // patch_size)**2
+
+        # TODO Set up parameters for the Patch Embedding
+        # ======= Answer START ========
+
+        # ======= Answer END ========
+        self.nin = nin
+        self.nout = nout
+        self.patch_size = patch_size
+        self.conv = nn.Conv2d(nin, nout, kernel_size=patch_size, stride=patch_size)
+    def forward(self, x: torch.Tensor):
+        # x        the input image. shape: (B, nin, Height, Width)
+        #
+        # Output
+        # out      the patch embeddings for the input. shape: (B, num_patches, nout)
+
+
+        # TODO: Implement the patch embedding. You want to split up the image into
+        # square patches of the given patch size. Then each patch_size x patch_size
+        # square should be linearly projected into an embedding of size nout.
+        #
+        # Hint: Take a look at nn.Conv2d. How can this be used to perform the
+        #       patch embedding?
+        out = self.conv(x)
+        out = out.flatten(2,3).permute(0,2,1)
+        # ======= Answer START ========
+
+        # ======= Answer END ========
+
+        return out
+class AttentionHead(nn.Module):
+    def __init__(self, dim: int, n_hidden: int):
+        # dim: the dimension of the input
+        # n_hidden: the dimension of the keys, queries, and values
+
+        super().__init__()
+
+        self.W_K = nn.Linear(dim, n_hidden) # W_K weight matrix
+        self.W_Q = nn.Linear(dim, n_hidden) # W_Q weight matrix
+        self.W_V = nn.Linear(dim, n_hidden) # W_V weight matrix
+        self.n_hidden = n_hidden
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        # x                the inputs. shape: (B x T x dim)
+        # attn_mask        an attention mask. If None, ignore. If not None, then mask[b, i, j]
+        #                  contains 1 if (in batch b) token i should attend on token j and 0
+        #                  otherwise. shape: (B x T x T)
+        #
+        # Outputs:
+        # attn_output      the output of performing self-attention on x. shape: (Batch x Num_tokens x n_hidden)
+        # alpha            the attention weights (after softmax). shape: (B x T x T)
+        #
+
+        #out, alpha =
+        T=x.shape[1]
+        B=x.shape[0]
+      #  out ,alpha = torch.zeros(B,T,T)
+        Q = self.W_Q(x)
+        K = self.W_K(x)
+        V = self.W_V(x)
+        scores = (torch.matmul(Q,K.transpose(1,2))/np.sqrt(self.n_hidden))
+        if (attn_mask is not None):
+         #   print(scores,"before")
+            scores = scores.masked_fill(attn_mask.cuda()==0,float('-inf'))
+          #  print(scores)
+           # print(scores.shape)
+        alpha =torch.nn.functional.softmax(scores,dim=-1)
+        attn_output = torch.matmul(alpha,V)
+        # TODO: Compute self attention on x.
+        #       (1) First project x to the query Q, key K, value V.
+        #       (2) Then compute the attention weights alpha as:
+        #                  alpha = softmax(QK^T/sqrt(n_hidden))
+        #           Make sure to take into account attn_mask such that token i does not attend on token
+        #           j if attn_mask[b, i, j] == 0. (Hint, in such a case, what value should you set the weight
+        #           to before the softmax so that after the softmax the value is 0?)
+        #       (3) The output is a linear combination of the values (weighted by the alphas):
+        #                  out = alpha V
+        #       (4) return the output and the alpha after the softmax
+
+        # ======= Answer START ========
+
+        # ======= Answer  END ========
+
+        return attn_output, alpha
+
+class VisionTransformer(nn.Module):
+    def __init__(self, n_channels: int, nout: int, img_size: int, patch_size: int, dim: int, attn_dim: int,
+                 mlp_dim: int, num_heads: int, num_layers: int):
+        # n_channels       number of input image channels
+        # nout             desired output dimension
+        # img_size         width of the square image
+        # patch_size       width of the square patch
+        # dim              embedding dimension
+        # attn_dim         the hidden dimension of the attention layer
+        # mlp_dim          the hidden layer dimension of the FFN
+        # num_heads        the number of heads in the attention layer
+        # num_layers       the number of attention layers.
+        super().__init__()
+        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, nin=n_channels, nout=dim)
+        self.pos_E = nn.Embedding((img_size//patch_size)**2, dim) # positional embedding matrix
+
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim)) # learned class embedding
+        self.transformer = Transformer(
+            dim=dim, attn_dim=attn_dim, mlp_dim=mlp_dim, num_heads=num_heads, num_layers=num_layers)
+
+        self.head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, nout)
+        )
+
+    def forward(self, img: torch.Tensor, return_attn=False) ->Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # img          the input image. shape: (B, nin, img_size, img_size)
+        # return_attn  whether to return the attention alphas
+        #
+        # Outputs
+        # out          the output of the vision transformer. shape: (B, nout)
+        # alphas       the attention weights for all heads and layers. None if return_attn is False, otherwise
+        #              shape: (B, num_layers, num_heads, num_patches + 1, num_patches + 1)
+
+        # generate embeddings
+        embs = self.patch_embed(img) # patch embedding
+        B, T, _ = embs.shape
+        pos_ids = torch.arange(T).expand(B, -1).to(embs.device)
+        embs += self.pos_E(pos_ids) # positional embedding
+
+        cls_token = self.cls_token.expand(len(embs), -1, -1)
+        x = torch.cat([cls_token, embs], dim=1)
+
+        x, alphas = self.transformer(x, attn_mask=None, return_attn=return_attn)
+        out = self.head(x)[:, 0]
+        
+        return out
+    

@@ -764,6 +764,7 @@ class MultiHeadedAttention(nn.Module):
 
         # ======= Answer END ========
         return attn_output, attn_alphas
+
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
@@ -789,6 +790,7 @@ class PatchEmbed(nn.Module):
         self.nout = nout
         self.patch_size = patch_size
         self.conv = nn.Conv2d(nin, nout, kernel_size=patch_size, stride=patch_size)
+
     def forward(self, x: torch.Tensor):
         # x        the input image. shape: (B, nin, Height, Width)
         #
@@ -809,6 +811,7 @@ class PatchEmbed(nn.Module):
         # ======= Answer END ========
 
         return out
+        
 class AttentionHead(nn.Module):
     def __init__(self, dim: int, n_hidden: int):
         # dim: the dimension of the input

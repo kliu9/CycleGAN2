@@ -156,12 +156,14 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256':
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'transformer':
+        net = VisionTransformer2(input_nc, 3 * 256 * 256, 256, 16, 128, 64, 128, num_heads=3, num_layers=6)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
-def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[],image_size=256):
+def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[], image_size=256):
     """Create a discriminator
 
     Parameters:
@@ -201,7 +203,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     elif netD == 'transformer':
-        net = VisionTransformer(input_nc,1,256,16,128,64,128,num_heads=3,num_layers=6)
+        net = VisionTransformer(input_nc, 1, 256, 16, 128, 64, 128, num_heads=3, num_layers=6)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -911,4 +913,53 @@ class VisionTransformer(nn.Module):
         out = self.head(x)[:, 0]
         
         return out
+    
+class VisionTransformer2(nn.Module):
+    def __init__(self, n_channels: int, nout: int, img_size: int, patch_size: int, dim: int, attn_dim: int,
+                 mlp_dim: int, num_heads: int, num_layers: int):
+        # n_channels       number of input image channels
+        # nout             desired output dimension
+        # img_size         width of the square image
+        # patch_size       width of the square patch
+        # dim              embedding dimension
+        # attn_dim         the hidden dimension of the attention layer
+        # mlp_dim          the hidden layer dimension of the FFN
+        # num_heads        the number of heads in the attention layer
+        # num_layers       the number of attention layers.
+        super().__init__()
+        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, nin=n_channels, nout=dim)
+        self.pos_E = nn.Embedding((img_size//patch_size)**2, dim) # positional embedding matrix
+
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim)) # learned class embedding
+        self.transformer = Transformer(
+            dim=dim, attn_dim=attn_dim, mlp_dim=mlp_dim, num_heads=num_heads, num_layers=num_layers)
+
+        self.head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, nout)
+        )
+
+    def forward(self, img: torch.Tensor, return_attn=False) ->Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # img          the input image. shape: (B, nin, img_size, img_size)
+        # return_attn  whether to return the attention alphas
+        #
+        # Outputs
+        # out          the output of the vision transformer. shape: (B, nout)
+        # alphas       the attention weights for all heads and layers. None if return_attn is False, otherwise
+        #              shape: (B, num_layers, num_heads, num_patches + 1, num_patches + 1)
+
+        # generate embeddings
+        embs = self.patch_embed(img) # patch embedding
+        B, T, _ = embs.shape
+        pos_ids = torch.arange(T).expand(B, -1).to(embs.device)
+        embs += self.pos_E(pos_ids) # positional embedding
+
+        cls_token = self.cls_token.expand(len(embs), -1, -1)
+        x = torch.cat([cls_token, embs], dim=1)
+
+        x, alphas = self.transformer(x, attn_mask=None, return_attn=return_attn)
+        out = self.head(x)[:, 0]
+        
+        # print("out.shape:", out.shape)
+        return out.reshape(1, 3, 256, 256)
     

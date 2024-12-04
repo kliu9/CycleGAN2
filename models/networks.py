@@ -716,6 +716,7 @@ class AttentionResidual(nn.Module):
         x = attn_out + x
         x = self.ffn(x) + x
         return x, alphas
+
 class MultiHeadedAttention(nn.Module):
     def __init__(self, dim: int, n_hidden: int, num_heads: int):
         # dim: the dimension of the input
@@ -965,4 +966,67 @@ class VisionTransformer2(nn.Module):
         
         # print("out.shape:", out.shape)
         return out.reshape(1, 3, 256, 256)
-    
+
+class VariationalPatchDiscriminator(nn.Module):
+    """Defines a variational patch discriminator"""
+
+    def __init__(self, input_nc, ndf=64, norm_layer=nn.BatchNorm2d):
+        """Construct a 1x1 PatchGAN discriminator
+
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            ndf (int)       -- the number of filters in the last conv layer
+            norm_layer      -- normalization layer
+        """
+        super(VariationalPatchDiscriminator, self).__init__()
+        if type(norm_layer) == functools.partial:  # no need to use bias as BatchNorm2d has affine parameters
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        self.edge_net = [
+            nn.Conv2d(input_nc, ndf, kernel_size=4, stride=4, padding=0),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(ndf, ndf * 2, kernel_size=4, stride=4, padding=0, bias=use_bias),
+            norm_layer(ndf * 2),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(ndf * 2, 1, kernel_size=1, stride=1, padding=0, bias=use_bias)
+        ]
+
+        self.center_net = [
+            nn.Conv2d(input_nc, ndf, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(ndf, ndf * 2, kernel_size=1, stride=1, padding=0, bias=use_bias),
+            norm_layer(ndf * 2),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(ndf * 2, 1, kernel_size=1, stride=1, padding=0, bias=use_bias)]
+
+        self.center_net = nn.Sequential(*self.net)
+
+    def forward(self, x):
+        """Standard forward."""
+        top_left = x[:, :, 0:64, 0:64]
+        top_right = x[:, :, 0:64, 192:256]
+        middle_left = x[:, :, 64:192, 0:64]
+        middle_right = x[:, :, 64:192, 192:256]
+        bottom_left = x[:, :, 192:256, 0:64]
+        bottom_right = x[:, :, 192:256, 192:256]
+        middle = x[:, :, 64:192, 64:192]
+
+        top_left = self.edge_net(top_left)
+        top_right = self.edge_net(top_right)
+        middle_left = self.edge_net(middle_left)
+        middle_right = self.edge_net(middle_right)
+        bottom_left = self.edge_net(bottom_left)
+        bottom_right = self.edge_net(bottom_right)
+        middle = self.center_net(middle)
+        
+        out = torch.zeros_like(x)
+        out[:, :, 0:top_left.size(2), 0:top_left.size(3)] = top_left
+        out[:, :, 0:top_right.size(2), 192:(192 + top_right.size(3))] = top_right
+        out[:, :, 192:(192 + bottom_left.size(2)), 0:bottom_left.size(3)] = bottom_left
+        out[:, :, 192:(192 + bottom_right.size(2)), 192:(192 + bottom_right.size(3))] = bottom_right
+        out[:, :, 64:(64 + middle.size(2)), 64:(64 + middle.size(3))] = middle
+        out[:, :, 64:(64 + middle_left.size(2)), 0:middle_left.size(3)] = middle_left
+        out[:, :, 64:(64 + middle_right.size(2)), 192:(192 + middle_right.size(3))] = middle_right
+        return out

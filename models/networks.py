@@ -973,7 +973,7 @@ class VariationalPatchDiscriminator(nn.Module):
     def __init__(self, input_nc, ndf=64, norm_layer=nn.BatchNorm2d):
         """Construct a 1x1 PatchGAN discriminator
 
-        Parameters:
+        Parameters:a
             input_nc (int)  -- the number of channels in input images
             ndf (int)       -- the number of filters in the last conv layer
             norm_layer      -- normalization layer
